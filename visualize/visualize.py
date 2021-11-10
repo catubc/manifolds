@@ -50,7 +50,8 @@ class Visualize():
                      rows=1,
                      cols=1,
                      fig=None,
-                     size=2
+                     size=2,
+                     cbar=True
                      ):
 
         #
@@ -75,10 +76,9 @@ class Visualize():
             )
 
             fig.layout.coloraxis.colorbar.title = title
-            fig.layout.coloraxis.colorscale = cmap
-            # fig.update_layout(height=800, width=1400)
-            #
-            fig.layout.coloraxis.colorbar.title = title
+            if cbar:
+                fig.layout.coloraxis.colorscale = cmap
+                fig.layout.coloraxis.colorbar.title = title
             fig.layout.coloraxis.colorscale = cmap
             #fig.show()
 
@@ -89,38 +89,60 @@ class Visualize():
                 fig = make_subplots(rows=1, cols=1,
                                 specs=[[{'type': 'scene'}]])
 
-            # df = pd.DataFrame(data[:, :3],
-            #                   columns=["DIM1", 'DIM2', "DIM3"])
-            fig.add_traces([go.Scatter3d(
-                x=data[:, 0],
-                y=data[:, 1],
-                z=data[:, 2],
-                mode='markers',
-                marker=dict(size=size,
-                            color=clrs,
-                            colorscale=cmap,
-                            opacity=1,
-                            colorbar=dict(thickness=25,
-                                          title=title,
-                                          # x=cols/10+2,
-                                          outlinewidth=0
 
-                                          )
+            if cbar:
 
-                            )
-            ),
+                fig.add_traces([go.Scatter3d(
+                    x=data[:, 0],
+                    y=data[:, 1],
+                    z=data[:, 2],
+                    mode='markers',
+                    marker=dict(size=size,
+                                color=clrs,
+                                colorscale=cmap,
+                                opacity=1,
+                                colorbar=dict(thickness=25,
+                                              title=title,
+                                              #textangle=-90,
+                                              outlinewidth=0
+                                              )
 
-            ],
+                                )
+                ),
 
-                rows=rows,
-                cols=cols)
+                ],
 
-            fig.layout.coloraxis.colorbar.title = title
-            fig.layout.coloraxis.colorscale = cmap
+                    rows=rows,
+                    cols=cols)
+
+               # fig.
+                fig.layout.coloraxis.colorbar.title = title
+                #fig.update_layout(coloraxis_colorbar_angle=-90)
+            else:
+                fig.add_traces([go.Scatter3d(
+                    x=data[:, 0],
+                    y=data[:, 1],
+                    z=data[:, 2],
+                    mode='markers',
+                    marker=dict(size=size,
+                                color=clrs,
+                                colorscale=cmap,
+                                opacity=1
+                                )
+                ),
+
+                ],
+
+                    rows=rows,
+                    cols=cols)
+
+                #fig.layout.coloraxis.colorbar.hide_colorbar()
+                fig.update_layout(coloraxis_showscale=False)
+
+            #fig.layout.coloraxis.colorscale = cmap
             fig.update_layout(height=800, width=1400)
 
-            fig.layout.coloraxis.colorbar.title = title
-            fig.layout.coloraxis.colorscale = cmap
+            #fig.layout.coloraxis.colorscale = cmap
             #fig.show()
 
         return fig
