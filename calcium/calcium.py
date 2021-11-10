@@ -637,18 +637,18 @@ class Calcium():
         return X_tsne_gpu
 
 
-    def compute_UMAP(self, X):
+    def compute_UMAP(self, X, n_components = 3, text=''):
         #
         print(self.root_dir)
 
-        fname_out = os.path.join(self.root_dir, 'umap.npz')
+        fname_out = os.path.join(self.root_dir, text+'umap.npz')
 
         try:
             data = np.load(fname_out, allow_pickle=True)
             X_umap = data['X_umap']
         except:
 
-            n_components = 2
+            n_components = n_components
             min_dist = 0.1
             n_neighbors = 50
             metric = 'euclidean'

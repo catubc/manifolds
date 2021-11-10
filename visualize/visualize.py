@@ -94,7 +94,7 @@ class Visualize():
                 y=data[:, 1],
                 z=data[:, 2],
                 mode='markers',
-                marker=dict(size=3,
+                marker=dict(size=2,
                             color=clrs,
                             colorscale=cmap,
                             opacity=1,
