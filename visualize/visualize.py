@@ -48,7 +48,9 @@ class Visualize():
                      title='',
                      cmap='viridis',
                      rows=1,
-                     cols=1
+                     cols=1,
+                     fig=None,
+                     size=2
                      ):
 
         #
@@ -60,7 +62,7 @@ class Visualize():
         #
         if data.shape[1] == 2:
 
-            fig = make_subplots(rows=1, cols=1)
+            #fig = make_subplots(rows=1, cols=1)
             #
             df = pd.DataFrame(data[:, :2],
                               columns=["DIM1", 'DIM2'])
@@ -83,8 +85,8 @@ class Visualize():
 
         #
         else:
-
-            fig = make_subplots(rows=1, cols=1,
+            if fig is None:
+                fig = make_subplots(rows=1, cols=1,
                                 specs=[[{'type': 'scene'}]])
 
             # df = pd.DataFrame(data[:, :3],
@@ -94,7 +96,7 @@ class Visualize():
                 y=data[:, 1],
                 z=data[:, 2],
                 mode='markers',
-                marker=dict(size=2,
+                marker=dict(size=size,
                             color=clrs,
                             colorscale=cmap,
                             opacity=1,
