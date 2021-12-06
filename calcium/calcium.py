@@ -312,12 +312,12 @@ class Calcium():
                                  'binarized_traces.npz'
                                  )
 
-        if os.path.exists(fname_out):
+        if os.path.exists(fname_out) and self.recompute==False:
             data = np.load(fname_out, allow_pickle=True)
-            self.F_onphase = data['F_onphase']
-            self.F_upphase = data['F_upphase']
+            self.F_onphase_bin = data['F_onphase']
+            self.F_upphase_bin = data['F_upphase']
             self.spks = data['spks']
-            self.spks_smooth_upphase = data['spks_smooth_upphase']
+            self.spks_smooth_bin = data['spks_smooth_upphase']
 
             # raw and filtered data;
             self.F_filtered = data['F_filtered']
