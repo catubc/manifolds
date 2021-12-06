@@ -8,6 +8,11 @@ import umap
 from sklearn.decomposition import PCA
 import pickle as pk
 import scipy
+from scipy.spatial import ConvexHull, convex_hull_plot_2d
+import parmap
+import networkx as nx
+import sklearn
+import pandas as pd
 
 def butter_highpass(cutoff, fs, order=5):
     nyq = 0.5 * fs
@@ -76,6 +81,19 @@ class Calcium():
 
         #
         self.keep_plot = True
+
+        # Oasis/spike parameters
+        self.oasis_thresh_prefilter = 15                       # min oasis spike value that survives
+        self.min_thresh_std_oasis = .1                          # upphase binarizatino step: min std for binarization of smoothed oasis curves
+        self.min_width_event_oasis = 2                              # <--- min width of the window in frame times
+        self.min_event_amplitude = 1                           # oasis scaled spikes: float point scaling boolean events; minimum amplitude required (removes very small amplitude events)
+
+        # Fluorescence parameters
+        self.min_thresh_std_Fluorescence_onphase = 1.5         # onphase binarization step: min x std for binarization of Fluorescence events
+        self.min_thresh_std_Fluorescence_upphase = 1.5         # upphase binarization step: min x std for binarization of Fluorescence events
+        self.min_width_event_Fluorescence = 15
+
+
 
     #
     def load_calcium(self):
@@ -176,7 +194,7 @@ class Calcium():
         if True:
             #os.path.exists(fname_out)==False:
             traces_out = traces.copy()
-            for k in trange(traces.shape[0]):
+            for k in trange(traces.shape[0], desc='standardizing'):
 
                 temp = traces[k]
                 temp -= np.median(temp)
@@ -268,7 +286,7 @@ class Calcium():
     def low_pass_filter(self, traces):
         #
         traces_out = traces.copy()
-        for k in trange(traces.shape[0]):
+        for k in trange(traces.shape[0], desc='low pass filter'):
             #
             temp = traces[k]
 
@@ -318,6 +336,51 @@ class Calcium():
 
         else:
             self.binarize_fluorescence()
+
+    def get_footprint_contour(self, cell_id):
+        points = np.vstack((self.stat[cell_id]['xpix'],
+                            self.stat[cell_id]['ypix'])).T
+
+        #
+        hull = ConvexHull(points)
+        hull_points = points[hull.vertices]
+        hull_points = np.vstack((hull_points, hull_points[0]))
+
+        return hull_points
+
+
+
+    def load_footprints(self):
+        dims = [512, 512]
+
+        img_all = np.zeros((dims[0], dims[1]))
+        imgs = []
+        contours = []
+        for k in range(len(self.stat)):
+            x = self.stat[k]['xpix']
+            y = self.stat[k]['ypix']
+            img_all[x, y] = self.stat[k]['lam']
+
+            # save footprint
+            img_temp = np.zeros((dims[0], dims[1]))
+            img_temp[x, y] = self.stat[k]['lam']
+
+            img_temp_norm = (img_temp - np.min(img_temp)) / (np.max(img_temp) - np.min(img_temp))
+            imgs.append(img_temp_norm)
+
+            contours.append(self.get_footprint_contour(k))
+
+        imgs = np.array(imgs)
+
+        # binarize footprints
+        imgs_bin = imgs.copy() * 1E5
+        imgs_bin = np.clip(imgs_bin, 0, 1)
+
+        self.contours = contours
+        self.footprints = imgs
+        self.footprints_all = img_all
+        self.footprints_bin = imgs_bin
+
 
     def binarize_fluorescence(self):
 
@@ -465,26 +528,6 @@ class Calcium():
                      min_event_amplitude=self.min_event_amplitude,
                      allow_pickle=True
                      )
-        # else:
-        #     data = np.load(fname_out, allow_pickle=True)
-        #     self.F_onphase = data['F_onphase'],
-        #     self.F_upphase = data['F_upphase'],
-        #     self.spks = data['spks'],
-        #     self.spks_smooth_upphase = data['spks_smooth_upphase'],
-        #
-        #     # raw and filtered data;
-        #     self.F_filtered = data['F_filtered'],
-        #     self.spks_x_F = data['oasis_x_F'],
-        #
-        #     # parameters saved to file as dictionary
-        #     self.oasis_thresh_prefilter = data['oasis_thresh_prefilter'],
-        #     self.min_thresh_std_oasis = data['min_thresh_std_oasis'],
-        #     self.min_thresh_std_Fluorescence_onphase = data['min_thresh_std_Fluorescence_onphase'],
-        #     self.min_thresh_std_Fluorescence_upphase = data['min_thresh_std_Fluorescence_upphase'],
-        #     self.min_width_event_Fluorescence = data['min_width_event_Fluorescence'],
-        #     self.min_width_event_oasis = data['min_width_event_oasis'],
-        #     self.min_event_amplitude = data['min_event_amplitude']
-
 
     #
     def smooth_traces(self, traces, F_detrended):
@@ -506,19 +549,19 @@ class Calcium():
         traces_out = traces.copy()
 
         # Smooth Oasis spikes first using savgolay filter + lowpass
-        for k in trange(traces.shape[0]):
+        for k in trange(traces.shape[0], desc='convolving oasis with exponentional and filtering'):
             temp = traces_out[k].copy()
 
-            # savgol filter:
-            if False:
-                temp = scipy.signal.savgol_filter(temp,
-                                               window_length,
-                                               polyorder,
-                                               deriv = deriv,
-                                               delta = delta)
+            # # savgol filter:
+            # if False:
+            #     temp = scipy.signal.savgol_filter(temp,
+            #                                    window_length,
+            #                                    polyorder,
+            #                                    deriv = deriv,
+            #                                    delta = delta)
             # convolve with an expnential function
-            else:
-                temp = np.convolve(temp, d_exp, mode='full')[:temp.shape[0]]
+            #else:
+            temp = np.convolve(temp, d_exp, mode='full')[:temp.shape[0]]
 
             # if True:
             #
@@ -529,47 +572,7 @@ class Calcium():
                 temp = butter_lowpass_filter(temp, 2, 30)
             traces_out[k] = temp
 
-        #
-        # if False:
-        #     # find best shift correlation between Smooth Oasis and Fluorescence
-        #     # usign first 10 neurons -  which usually have highest SNR
-        #     all_shifts = []
-        #     for n in range(10):
-        #         # shifts
-        #         shifts = []
-        #         for s in range(-60, 60, 1):
-        #             temp1 = np.roll(traces_out[n],s)
-        #
-        #             temp2 = F_detrended[n]
-        #
-        #             shifts.append(np.correlate(temp1, temp2, mode='valid'))
-        #
-        #         all_shifts.append(shifts)
-        #
-        #     shifts = np.array(all_shifts).squeeze()
-        #     maxes = np.argmax(shifts,axis=1)
-        #
-        #     # take correct shift as the median
-        #     final_shift = int(np.mean(maxes))-60
-        #
-        #     # reshift the traces to match the data
-        #     if True:
-        #         for k in trange(traces_out.shape[0]):
-        #             temp = np.roll(traces_out[k],
-        #                                     final_shift)
-        #             # zero out the rolled values
-        #             #print ("temp: ", temp.shape)
-        #
-        #             temp[:final_shift*2] = 0
-        #             temp[-final_shift*2:] = 0
-        #
-        #             #
-        #             traces_out[k] = temp
-
-
         return traces_out
-
-
 
     #
     def band_pass_filter(self, traces):
@@ -578,7 +581,7 @@ class Calcium():
 
         #
         traces_out = traces.copy()
-        for k in trange(traces.shape[0]):
+        for k in trange(traces.shape[0], desc='band pass filter'):
             #
             temp = traces[k]
 
@@ -601,7 +604,7 @@ class Calcium():
         from scipy.signal import chirp, find_peaks, peak_widths
 
         #
-        for k in trange(traces.shape[0]):
+        for k in trange(traces.shape[0], desc='scaling binarized data'):
             temp = traces[k].copy()
 
             #
@@ -646,7 +649,7 @@ class Calcium():
         traces_bin = traces.copy()
 
         #
-        for k in trange(traces.shape[0]):
+        for k in trange(traces.shape[0], desc='binarizing continuous traces'):
             temp = traces[k].copy()
 
             # find threshold crossings standard deviation based
@@ -689,7 +692,7 @@ class Calcium():
             traces_out_anti_aliased = traces.copy() * 0  # this generates minimum of 20 time steps for better vis
 
             #
-            for k in trange(traces.shape[0]):
+            for k in trange(traces.shape[0], desc='computing derivative'):
                 temp = traces[k]
 
                 #std = np.std(temp)
@@ -727,7 +730,7 @@ class Calcium():
         if os.path.exists(fname_out)==False:
             traces_out = traces.copy()*0
             traces_out_anti_aliased = traces.copy()*0  # this generates minimum of 20 time steps for better vis
-            for k in trange(traces.shape[0]):
+            for k in trange(traces.shape[0], desc='binarizing'):
                 temp = traces[k]
 
                 std = np.std(temp)
@@ -859,7 +862,7 @@ class Calcium():
         clrs.append(ctr)
 
         #
-        for k in trange(1, data.shape[0], 1):
+        for k in trange(1, data.shape[0], 1, desc='finding sequences'):
 
             temp = dist = np.linalg.norm(data[k] - data[k - 1])
 
@@ -881,5 +884,444 @@ class Calcium():
 
         return segs, clrs
 
+    def find_candidate_neurons_overlaps(self):
 
+        dist_corr_matrix = []
+        for index, row in self.df_overlaps.iterrows():
+            cell1 = int(row['cell1'])
+            cell2 = int(row['cell2'])
+            percent1 = row['percent_cell1']
+            percent2 = row['percent_cell2']
+
+            if cell1 < cell2:
+                corr = self.corr_array[cell1, cell2, 0]
+            else:
+                corr = self.corr_array[cell2, cell1, 0]
+
+            dist_corr_matrix.append([cell1, cell2, corr, max(percent1, percent2)])
+
+        dist_corr_matrix = np.vstack(dist_corr_matrix)
+
+        #####################################################
+        idx1 = np.where(dist_corr_matrix[:, 3] >= self.corr_max_percent_overlap)[0]
+        idx2 = np.where(dist_corr_matrix[idx1, 2] >= self.corr_threshold)[0]
+        idx3 = idx1[idx2]
+
+        #
+        self.candidate_neurons = dist_corr_matrix[idx3][:, :2]
+
+        return self.candidate_neurons
+
+
+
+    def find_candidate_neurons_centers(self):
+        dist_corr_matrix = []
+
+        for k in trange(self.dists.shape[0], desc='finding candidate neurons'):
+            for p in range(k + 1, self.dists.shape[0]):
+                dist = self.dists[k, p]
+                corr = self.corr_array[k, p, 0]
+                dist_corr_matrix.append([dist, corr, k, p])
+
+        dist_corr_matrix = np.vstack(dist_corr_matrix)
+
+        # ####################################################
+        # ####### GET NEURONS WITH SUSPICIOUS PROPERTIES #####
+        # ####################################################
+        idx1 = np.where(dist_corr_matrix[:, 0] <= self.corr_min_distance)[0]
+        idx2 = np.where(dist_corr_matrix[idx1, 1] >= self.corr_threshold)[0]
+
+        #
+        idx3 = idx1[idx2]
+
+        self.candidate_neurons = dist_corr_matrix[idx3][:, 2:]
+
+        return self.candidate_neurons
+
+    def make_correlated_neuron_graph(self):
+        adjacency = np.zeros((self.F.shape[0],
+                              self.F.shape[0]))
+        for i in self.candidate_neurons:
+            adjacency[int(i[0]), int(i[1])] = 1
+
+        G = nx.Graph(adjacency)
+        G.remove_nodes_from(list(nx.isolates(G)))
+
+        self.G = G
+
+
+
+    def delete_duplicate_cells(self):
+        from time import sleep
+
+        a = nx.connected_components(self.G)
+        removed_cells = []
+        tot, a = it_count(a)
+        with tqdm(total=tot) as pbar:
+            ctr=0
+            for nn in a:
+                if self.corr_delete_method=='lowest_snr':
+                    good_ids, removed_ids = del_lowest_snr(nn, self)
+                elif self.corr_delete_method=='highest_connected':
+                    good_ids, removed_ids = del_highest_connected_nodes(nn, self)
+                # print (removed_ids)
+                removed_cells.append(removed_ids)
+                #sleep(0.01)
+                pbar.update(ctr)
+                ctr+=1
+        #
+        removed_cells = np.hstack(removed_cells)
+        clean_cells = np.delete(np.arange(self.F.shape[0]),
+                              removed_cells)
+        self.clean_cell_ids = clean_cells
+
+        return self.clean_cell_ids
+
+    def plot_corr_vs_distance(self):
+        dist_corr_matrix = []
+        for k in range(self.dists.shape[0]):
+            for p in range(k + 1, self.dists.shape[0]):
+                if k in self.clean_cell_ids and p in self.clean_cell_ids:
+                    dist = self.dists[k, p]
+                    corr = self.corr_array[k, p, 0]
+                    dist_corr_matrix.append([dist, corr, k, p])
+
+        dist_corr_matrix = np.vstack(dist_corr_matrix)
+        plt.scatter(dist_corr_matrix[:, 0], dist_corr_matrix[:, 1],
+                    alpha=.3,
+                    edgecolor='black')
+
+        plt.ylabel("correlation")
+        plt.xlabel("distance between centres (pixels)")
+
+        # ####################################################
+        # ####### GET NEURONS WITH SUSPICIOUS PROPERTIES #####
+        # ####################################################
+        if True:
+            idx1 = np.where(dist_corr_matrix[:, 0] <= self.corr_min_distance)[0]
+            idx2 = np.where(dist_corr_matrix[idx1, 1] >= self.corr_threshold)[0]
+
+            #
+            idx3 = idx1[idx2]
+            plt.scatter(dist_corr_matrix[idx3, 0],
+                        dist_corr_matrix[idx3, 1],
+                        alpha=.1,
+                        edgecolor='red')
+
+
+    def remove_duplicate_neurons(self):
+
+        # get pairwise distances between neuron centres; distsupper is zeroed out array
+
+        if self.deduplication_method == 'centre_distance':
+            self.dists, self.dists_upper = find_inter_cell_distance(self.footprints)
+        elif self.deduplication_method == 'overlap':
+            self.df_overlaps = generate_cell_overlaps(self)
+
+        # compute correlations between neurons
+        rasters = self.F_filtered   # use fluorescence filtered traces
+        self.corrs = compute_correlations(rasters, self)
+        self.corr_array = make_correlation_array(self.corrs, rasters)
+
+        # find neurnos that are below threhsolds
+        if self.deduplication_method =='centre_distance':
+            self.candidate_neurons = self.find_candidate_neurons_centers()
+        elif self.deduplication_method == 'overlap':
+            self.candidate_neurons = self.find_candidate_neurons_overlaps()
+
+
+        # find connected neurons and remove singles
+        self.make_correlated_neuron_graph()
+
+        #
+        self.delete_duplicate_cells()
+
+def parallel_network_delete(nn, ):
+    pass
+
+
+def it_count(it):
+    import itertools
+    tmp_it, new_it = itertools.tee(it)
+    return sum(1 for _ in tmp_it), new_it
+
+
+def signaltonoise(a, axis=0, ddof=0):
+    a = np.asanyarray(a)
+    m = a.mean(axis)
+    sd = a.std(axis=axis, ddof=ddof)
+    return np.where(sd == 0, 0, m / sd)
+
+
+#
+def get_correlations(ids, c):
+    corrs = []
+    for i in range(ids.shape[0]):
+        for ii in range(i + 1, ids.shape[0], 1):
+            if ids[i] < ids[ii]:
+                corrs.append(c.corr_array[ids[i], ids[ii], 0])
+            else:
+                corrs.append(c.corr_array[ids[ii], ids[i], 0])
+
+    corrs = np.array(corrs)
+
+    return corrs
+
+
+def del_highest_connected_nodes(nn, c):
+    # get correlations for all cells in group
+    ids = np.array(list(nn))
+    corrs = get_correlations(ids, c)
+    # print("ids: ", ids, " starting corrs: ", corrs)
+
+    # find lowest SNR neuron
+    removed_cells = []
+    while np.max(corrs) > c.corr_threshold:
+
+        n_connections = []
+        snrs = []
+        for n in ids:
+            temp1 = signaltonoise(c.F_filtered[n])
+            snrs.append(temp1)
+            temp2 = c.G.edges([n])
+            n_connections.append(len(temp2))
+
+        # find max # of edges
+        max_edges = np.max(n_connections)
+        idx = np.where(n_connections == max_edges)[0]
+
+        # if a single max exists:
+        if idx.shape[0] == 1:
+            idx2 = np.argmax(n_connections)
+            removed_cells.append(ids[idx2])
+            ids = np.delete(ids, idx2, 0)
+        # else select the lowest SNR among the nodes
+        else:
+            snrs = np.array(snrs)
+            snrs_idx = snrs[idx]
+            idx3 = np.argmin(snrs_idx)
+
+            if c.verbose:
+                print("multiple matches found: ", snrs, snrs_idx, idx3)
+            removed_cells.append(ids[idx[idx3]])
+            ids = np.delete(ids, idx[idx3], 0)
+
+        if ids.shape[0] == 1:
+            break
+
+        corrs = get_correlations(ids, c)
+        if c.verbose:
+            print("ids: ", ids, "  corrs: ", corrs)
+
+    good_cells = ids
+    return good_cells, removed_cells
+
+
+#
+def del_lowest_snr(nn, c):
+
+    '''
+        input
+        nn
+        c.corr_threshold
+        c.F_filtered
+
+
+    :param nn:
+    :param c:
+    :return:
+    '''
+    # get correlations for all cells in group
+    ids = np.array(list(nn))
+    corrs = get_correlations(ids, c)
+    # print("ids: ", ids, " starting corrs: ", corrs)
+
+    # find lowest SNR neuron
+    removed_cells = []
+    while np.max(corrs) > c.corr_threshold:
+        snrs = []
+        for n in ids:
+            temp = signaltonoise(c.F_filtered[n])
+            snrs.append(temp)
+
+        # print ("ids: ", ids, "  snrs: ", snrs)
+        idx = np.argmin(snrs)
+        removed_cells.append(ids[idx])
+        ids = np.delete(ids, idx, 0)
+
+        if ids.shape[0] == 1:
+            break
+
+        corrs = get_correlations(ids, c)
+    # print ("ids: ", ids, "  corrs: ", corrs)
+
+    good_cells = ids
+    return good_cells, removed_cells
+
+
+
+def array_row_intersection(a, b):
+    tmp = np.prod(np.swapaxes(a[:, :, None], 1, 2) == b, axis=2)
+    return a[np.sum(np.cumsum(tmp, axis=0) * tmp == 1, axis=1).astype(bool)]
+
+
+def find_overlaps1(ids, footprints):
+    #
+    intersections = []
+    for k in ids:
+        temp1 = footprints[k]
+        idx1 = np.vstack(np.where(temp1 > 0)).T
+        # centre1 = np.median(idx1,axis=0)
+
+        #
+        for p in range(k + 1, footprints.shape[0], 1):
+            temp2 = footprints[p]
+            idx2 = np.vstack(np.where(temp2 > 0)).T
+            # centre2 = np.median(idx2,axis=0)
+
+            #
+            # dist = np.linalg.norm(centre1-centre2)
+            # if dist < min_distance:
+            # print ("idxes: ", idx1, idx2)
+            res = array_row_intersection(idx1, idx2)
+            if len(res) > 0:
+                percent1 = res.shape[0] / idx1.shape[0]
+                percent2 = res.shape[0] / idx2.shape[0]
+                intersections.append([k, p, res.shape[0], percent1, percent2])
+            # else:
+            #    intersections.append([k,p,[]])
+            # else:
+            #   intersections.append([k,p,[]])
+    #
+    return intersections
+
+#
+def find_overlaps(ids, footprints):
+    #
+    intersections = []
+    for k in ids:
+        temp = footprints[k]
+        idx1 = np.vstack(np.where(temp > 0)).T
+
+        #
+        for p in range(k + 1, footprints.shape[0], 1):
+            temp = footprints[p]
+            idx2 = np.vstack(np.where(temp > 0)).T
+
+            res = array_row_intersection(idx1, idx2)
+            if len(res) > 0:
+                intersections.append([k, p, res])
+
+    return intersections
+
+
+#
+def make_overlap_database(res):
+    data = []
+    for k in range(len(res)):
+        for p in range(len(res[k])):
+            # print (res[k][p])
+            data.append(res[k][p])
+
+    df = pd.DataFrame(data, columns=['cell1', 'cell2',
+                                     'pixels_overlap',
+                                     'percent_cell1',
+                                     'percent_cell2'])
+
+    return (df)
+
+
+#
+def find_inter_cell_distance(footprints):
+    locations = []
+    for k in trange(footprints.shape[0], desc='finding medians'):
+        temp = footprints[k]
+        centre = np.median(np.vstack(np.where(temp > 0)).T, axis=0)
+        locations.append(centre)
+
+    locations = np.vstack(locations)
+    dists = sklearn.metrics.pairwise.euclidean_distances(locations)
+
+    # zero out bottom part of matrix for redundancy
+    dists_upper = np.triu(dists, -1)
+
+    idx = np.where(dists == 0)
+    dists[idx] = np.nan
+
+    return dists, dists_upper
+
+
+#
+def compute_correlations(rasters, c):
+    fname_out = os.path.join(c.root_dir,
+                             c.animal_id,
+                             c.session,
+                             'suite2p',
+                             'plane0',
+                             'cell_correlations.npy'
+                             )
+    if os.path.exists(fname_out) == False:
+        #
+        corrs = []
+        for k in trange(rasters.shape[0],desc='computing intercell correlation'):
+            temp1 = rasters[k]
+            #
+            for p in range(k + 1, rasters.shape[0], 1):
+                temp2 = rasters[p]
+                corr = scipy.stats.pearsonr(temp1,
+                                            temp2)
+
+                corrs.append([k, p, corr[0], corr[1]])
+
+        corrs = np.vstack(corrs)
+
+        np.save(fname_out, corrs)
+    else:
+        corrs = np.load(fname_out)
+
+    return corrs
+
+
+def make_correlation_array(corrs, rasters):
+    data = []
+    corr_array = np.zeros((rasters.shape[0], rasters.shape[0], 2), 'float32')
+
+    for k in trange(len(corrs),desc='getting correlations and pvals'):
+        cell1 = int(corrs[k][0])
+        cell2 = int(corrs[k][1])
+        pcor = corrs[k][2]
+        pval = corrs[k][3]
+
+        corr_array[cell1, cell2, 0] = pcor
+        corr_array[cell1, cell2, 1] = pval
+
+    return corr_array
+
+
+def generate_cell_overlaps(c):
+    fname_out = os.path.join(c.root_dir,
+                             c.animal_id,
+                             c.session,
+                             'suite2p',
+                             'plane0',
+                             'cell_overlaps.pkl'
+                             )
+
+    if os.path.exists(fname_out) == False:
+
+        ids = np.array_split(np.arange(c.footprints.shape[0]), 30)
+        res = parmap.map(find_overlaps1,
+                         ids,
+                         c.footprints,
+                         pm_processes=8,
+                         pm_pbar=True)
+
+        df = make_overlap_database(res)
+
+        df.to_pickle(fname_out)  # where to save it, usually as a .pkl
+
+    else:
+        df = pd.read_pickle(fname_out)
+
+    return df
 
