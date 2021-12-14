@@ -82,6 +82,9 @@ class Calcium():
         #
         self.keep_plot = True
 
+        #
+        self.recompute = False
+
         # Oasis/spike parameters
         self.oasis_thresh_prefilter = 15                       # min oasis spike value that survives
         self.min_thresh_std_oasis = .1                          # upphase binarizatino step: min std for binarization of smoothed oasis curves
@@ -756,15 +759,17 @@ class Calcium():
         return traces_out, traces_out_anti_aliased
 
 
-    def compute_PCA(self, X, suffix=''):
+    def compute_PCA(self, X, suffix='', recompute=True):
         #
 
         # run PCA
 
-        fname_out = os.path.join(self.root_dir, 'pca_'+suffix+'.pkl')
+        fname_out = os.path.join(self.root_dir, self.animal_id,
+                                 self.session,
+                                 'suite2p','plane0', 'pca_'+suffix+'.pkl')
 
-        if os.path.exists(fname_out)==False:
-
+        if os.path.exists(fname_out)==False or recompute:
+            print ("... running PCA ...")
             pca = PCA()
             X_pca = pca.fit_transform(X)
 
@@ -970,7 +975,10 @@ class Calcium():
                 pbar.update(ctr)
                 ctr+=1
         #
-        removed_cells = np.hstack(removed_cells)
+        if len(removed_cells)>0:
+            removed_cells = np.hstack(removed_cells)
+        else:
+            removed_cells = []
         clean_cells = np.delete(np.arange(self.F.shape[0]),
                               removed_cells)
         self.clean_cell_ids = clean_cells
@@ -997,7 +1005,7 @@ class Calcium():
         # ####################################################
         # ####### GET NEURONS WITH SUSPICIOUS PROPERTIES #####
         # ####################################################
-        if True:
+        if self.show_outliers:
             idx1 = np.where(dist_corr_matrix[:, 0] <= self.corr_min_distance)[0]
             idx2 = np.where(dist_corr_matrix[idx1, 1] >= self.corr_threshold)[0]
 
@@ -1013,10 +1021,10 @@ class Calcium():
 
         # get pairwise distances between neuron centres; distsupper is zeroed out array
 
-        if self.deduplication_method == 'centre_distance':
-            self.dists, self.dists_upper = find_inter_cell_distance(self.footprints)
-        elif self.deduplication_method == 'overlap':
-            self.df_overlaps = generate_cell_overlaps(self)
+        #if self.deduplication_method == 'centre_distance':
+        self.dists, self.dists_upper = find_inter_cell_distance(self.footprints)
+        #elif self.deduplication_method == 'overlap':
+        self.df_overlaps = generate_cell_overlaps(self)
 
         # compute correlations between neurons
         rasters = self.F_filtered   # use fluorescence filtered traces
@@ -1171,27 +1179,18 @@ def find_overlaps1(ids, footprints):
     for k in ids:
         temp1 = footprints[k]
         idx1 = np.vstack(np.where(temp1 > 0)).T
-        # centre1 = np.median(idx1,axis=0)
 
         #
         for p in range(k + 1, footprints.shape[0], 1):
             temp2 = footprints[p]
             idx2 = np.vstack(np.where(temp2 > 0)).T
-            # centre2 = np.median(idx2,axis=0)
+            res = array_row_intersection(idx1, idx2)
 
             #
-            # dist = np.linalg.norm(centre1-centre2)
-            # if dist < min_distance:
-            # print ("idxes: ", idx1, idx2)
-            res = array_row_intersection(idx1, idx2)
             if len(res) > 0:
                 percent1 = res.shape[0] / idx1.shape[0]
                 percent2 = res.shape[0] / idx2.shape[0]
                 intersections.append([k, p, res.shape[0], percent1, percent2])
-            # else:
-            #    intersections.append([k,p,[]])
-            # else:
-            #   intersections.append([k,p,[]])
     #
     return intersections
 
