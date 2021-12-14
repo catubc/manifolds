@@ -529,7 +529,6 @@ class Calcium():
                      min_width_event_Fluorescence=self.min_width_event_Fluorescence,
                      min_width_event_oasis=self.min_width_event_oasis,
                      min_event_amplitude=self.min_event_amplitude,
-                     allow_pickle=True
                      )
 
     #
@@ -1309,11 +1308,18 @@ def generate_cell_overlaps(c):
     if os.path.exists(fname_out) == False:
 
         ids = np.array_split(np.arange(c.footprints.shape[0]), 30)
-        res = parmap.map(find_overlaps1,
+
+        if c.parallel:
+            res = parmap.map(find_overlaps1,
                          ids,
                          c.footprints,
-                         pm_processes=8,
+                         pm_processes=c.n_cores,
                          pm_pbar=True)
+        else:
+            res = []
+            for k in trange(len(ids)):
+                res.append(find_overlaps1(ids[k],
+                                          c.footprints))
 
         df = make_overlap_database(res)
 
