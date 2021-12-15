@@ -85,6 +85,10 @@ class Calcium():
         #
         self.recompute = False
 
+        #
+        self.parallel = True
+        self.n_cores = 4
+
         # Oasis/spike parameters
         self.oasis_thresh_prefilter = 15                       # min oasis spike value that survives
         self.min_thresh_std_oasis = .1                          # upphase binarizatino step: min std for binarization of smoothed oasis curves
@@ -758,14 +762,15 @@ class Calcium():
         return traces_out, traces_out_anti_aliased
 
 
-    def compute_PCA(self, X, suffix='', recompute=True):
+    def compute_PCA(self, X, suffix='', recompute=True, cell_randomization=False):
         #
 
         # run PCA
 
         fname_out = os.path.join(self.root_dir, self.animal_id,
                                  self.session,
-                                 'suite2p','plane0', 'pca_'+suffix+'.pkl')
+                                 'suite2p','plane0', 'pca_'+suffix+'_random_'+
+                                   str(cell_randomization)+'.pkl')
 
         if os.path.exists(fname_out)==False or recompute:
             print ("... running PCA ...")
@@ -1281,7 +1286,7 @@ def compute_correlations(rasters, c):
 
 
 def make_correlation_array(corrs, rasters):
-    data = []
+    # data = []
     corr_array = np.zeros((rasters.shape[0], rasters.shape[0], 2), 'float32')
 
     for k in trange(len(corrs),desc='getting correlations and pvals'):
