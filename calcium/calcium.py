@@ -13,7 +13,9 @@ import parmap
 import networkx as nx
 import sklearn
 import pandas as pd
+import cv2
 
+#
 def butter_highpass(cutoff, fs, order=5):
     nyq = 0.5 * fs
     normal_cutoff = cutoff / nyq
@@ -344,15 +346,46 @@ class Calcium():
         else:
             self.binarize_fluorescence()
 
-    def get_footprint_contour(self, cell_id):
+    def get_footprint_contour(self, cell_id, cell_boundary='convex_hull'):
         points = np.vstack((self.stat[cell_id]['xpix'],
                             self.stat[cell_id]['ypix'])).T
 
-        #
-        hull = ConvexHull(points)
-        hull_points = points[hull.vertices]
-        hull_points = np.vstack((hull_points, hull_points[0]))
+        img = np.zeros((512,512),dtype=np.uint8)
+        img[points[:,0],points[:,1]] = 1
 
+        #
+        if cell_boundary=='concave_hull':
+            hull_points = cv2.findContours(img,cv2.RETR_TREE,cv2.CHAIN_APPROX_NONE)[0][0].squeeze()
+
+            # check for weird single isolated pixel cells
+            if hull_points.shape[0]==2:
+                dists = sklearn.metrics.pairwise_distances(points)
+                idx = np.where(dists==0)
+                dists[idx]=1E3
+                mins = np.min(dists,axis=1)
+
+                # find pixels that are more than 1 pixel away from nearest neighbour
+                idx = np.where(mins>1)[0]
+
+                # delete isoalted points
+                points = np.delete(points, idx, axis=0)
+
+                #
+                img = np.zeros((512, 512), dtype=np.uint8)
+                img[points[:, 0], points[:, 1]] = 1
+                hull_points = cv2.findContours(img,cv2.RETR_TREE,cv2.CHAIN_APPROX_NONE)[0][0].squeeze()
+
+            # add last point
+            hull_points = np.vstack((hull_points, hull_points[0]))
+
+
+        elif cell_boundary=='convex_hull':
+            #
+            hull = ConvexHull(points)
+            hull_points = points[hull.vertices]
+            hull_points = np.vstack((hull_points, hull_points[0]))
+
+        #print ("cell: ", cell_id, "  hullpoints: ", hull_points)
         return hull_points
 
 
@@ -1335,3 +1368,43 @@ def generate_cell_overlaps(c):
 
     return df
 
+def alpha_shape(points, alpha=0.6):
+
+    from shapely.ops import cascaded_union, polygonize
+    from scipy.spatial import Delaunay
+    import shapely.geometry as geometry
+    """
+    Compute the alpha shape (concave hull) of a set
+    of points.
+    @param points: Iterable container of points.
+    @param alpha: alpha value to influence the
+        gooeyness of the border. Smaller numbers
+        don't fall inward as much as larger numbers.
+        Too large, and you lose everything!
+    """
+    if len(points) < 4:
+        # When you have a triangle, there is no sense
+        # in computing an alpha shape.
+        return geometry.MultiPoint(list(points)).convex_hull
+
+    #coords = np.array([point.coords[0] for point in points])
+    coords = points
+
+    #
+    tri = Delaunay(coords)
+    triangles = coords[tri.vertices]
+    a = ((triangles[:,0,0] - triangles[:,1,0]) ** 2 + (triangles[:,0,1] - triangles[:,1,1]) ** 2) ** 0.5
+    b = ((triangles[:,1,0] - triangles[:,2,0]) ** 2 + (triangles[:,1,1] - triangles[:,2,1]) ** 2) ** 0.5
+    c = ((triangles[:,2,0] - triangles[:,0,0]) ** 2 + (triangles[:,2,1] - triangles[:,0,1]) ** 2) ** 0.5
+    s = ( a + b + c ) / 2.0
+    areas = (s*(s-a)*(s-b)*(s-c)) ** 0.5
+    circums = a * b * c / (4.0 * areas)
+    filtered = triangles[circums < (1.0 / alpha)]
+    edge1 = filtered[:,(0,1)]
+    edge2 = filtered[:,(1,2)]
+    edge3 = filtered[:,(2,0)]
+    edge_points = np.unique(np.concatenate((edge1,edge2,edge3)), axis = 0).tolist()
+    m = geometry.MultiLineString(edge_points)
+    triangles = list(polygonize(m))
+
+    return cascaded_union(triangles), edge_points
